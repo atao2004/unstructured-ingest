@@ -1,3 +1,31 @@
+## [1.6.16]
+
+### Fixes
+
+- **fix(weaviate): declare `metadata.data_source.version` explicitly as `text` to prevent auto-schema uuid inference.** When the destination collection did not yet exist, Weaviate's auto-schema typed `metadata.data_source.version` based on the value shape of the first inserted record; UUID-formatted source ETags caused the property to be locked as `uuid`, after which later records carrying non-UUID-shaped identifiers (e.g. multipart `<hex>-<part_count>` ETags, or opaque version strings from source connectors that do not return UUID-formatted ETags) were rejected with `WeaviateInsertManyAllFailedError: requires a string of UUID format`. The collection config now declares the field as `text` at creation time so auto-schema does not fire for it. The existing `str()` cast in `WeaviateUploadStager.conform_dict` is harmless and stays. Other `metadata.*` fields remain auto-schemed; this is the minimum change to unblock the observed failure mode without expanding the static schema.
+
+## [1.6.15]
+
+### Fixes
+
+- **fix(sharepoint): return all principals in document `permissions_data` instead of a single collapsed identity.** `office365-rest-python-client` shares one mutable-default `Identity` singleton across every `Permission` deserialization, so SDK typed reads collapsed every document's permissions to whichever user/group was deserialized last. The connector now bypasses the SDK's typed accessors and parses raw Graph `/$batch` JSON directly, so per-document users and groups round-trip distinctly. Reported by Intel.
+
+### Enhancements
+
+- **feat(onedrive): expose document ACLs in `permissions_data`.** OneDrive previously always returned `permissions_data: null`. The indexer now performs the same chunked Graph `/$batch` permission fetch as SharePoint and writes the canonical `read` / `update` / `delete` buckets (matching the Google Drive / Confluence schema) into `metadata.permissions_data`. Empty fetches and per-item failures degrade to the previous behavior. `tenacity` is added to the `onedrive` and `sharepoint` extras.
+
+## [1.6.14]
+
+### Fixes
+
+- **fix(connectors): stop asserting environment-specific URLs in Notion/OneDrive/SharePoint source integration tests.** The expected-results diff compared `additional_metadata.url` (Notion page id, MS Graph drive id) and `@microsoft.graph.downloadUrlNoAuth` (a tokenized no-auth download link), both of which vary by test tenant/workspace and per request. With no connector code change, these drifted and reddened `blob_storage_connectors_int_test` and `uncategorized_connectors_int_test` on main and every PR. Both fields are now excluded from the comparison, consistent with the existing exclusions of `@microsoft.graph.downloadUrl`, `LastModified`, and `date_*`.
+
+## [1.6.13]
+
+### Fixes
+
+- **fix(weaviate): set `vectorIndexType: "hnsw"` in the auto-created collection schema.** The default Weaviate collection config (`unstructured_ingest/processes/connectors/assets/weaviate_collection_config.json`) declared `vectorizer: "none"` but left `vectorIndexType` unset. Newer Weaviate server versions no longer infer a vector index when none is specified, so collections created via `WeaviateUploader.create_destination` came up without an index — vectors uploaded by the pipeline could not be queried with `near_vector` / `hybrid`, returning empty results. The schema now declares `hnsw` explicitly so auto-created collections are immediately searchable. Existing user-managed collections (`flatten_metadata=true`) are unaffected.
+
 ## [1.6.12]
 
 ### Enhancements
