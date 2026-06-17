@@ -1,7 +1,7 @@
 ## [1.6.17]
 
 ### Enhancements
-- **feat(slack): automatically join channels** have slack application automatically attempt to join the channel it was configured to read, report a verbose error when not possible
+- **feat(slack): automatically join channels.** Have the Slack application automatically attempt to join the channel it was configured to read; report a clear per-channel error when the bot lacks access.
 
 ## [1.6.16]
 

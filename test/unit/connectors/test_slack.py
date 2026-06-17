@@ -266,3 +266,35 @@ def test_slack_indexer_join_failure_is_best_effort():
 
     client.conversations_join.assert_called_once_with(channel="C-PUBLIC")
     assert len(file_data) == 1
+
+
+def test_slack_indexer_join_network_failure_is_best_effort():
+    client = Mock()
+    client.conversations_info.return_value = {"channel": {"is_private": False}}
+    # A transport-level error during join must also be treated as best-effort.
+    client.conversations_join.side_effect = ConnectionError("network unreachable")
+    client.conversations_history.return_value = [
+        {"messages": [{"ts": "1710000000.000100", "text": "hello"}]}
+    ]
+    indexer = _make_indexer(client, "C-PUBLIC")
+
+    file_data = list(indexer.run())
+
+    client.conversations_join.assert_called_once_with(channel="C-PUBLIC")
+    assert len(file_data) == 1
+
+
+def test_slack_indexer_info_network_failure_is_best_effort():
+    client = Mock()
+    # A transport-level error during conversations_info must not abort indexing.
+    client.conversations_info.side_effect = ConnectionError("network unreachable")
+    client.conversations_history.return_value = [
+        {"messages": [{"ts": "1710000000.000100", "text": "hello"}]}
+    ]
+    indexer = _make_indexer(client, "C-PUBLIC")
+
+    file_data = list(indexer.run())
+
+    # Join is skipped because is_private defaults to False when info fails.
+    client.conversations_join.assert_not_called()
+    assert len(file_data) == 1

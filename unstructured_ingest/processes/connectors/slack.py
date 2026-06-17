@@ -284,25 +284,24 @@ class SlackIndexer(Indexer):
 
         Returns whether the channel is private so the caller can phrase membership errors.
         """
-        from slack_sdk.errors import SlackApiError
-
         is_private = False
         try:
             info = client.conversations_info(channel=channel)
             channel_info = info.get("channel") or {}
             is_private = bool(channel_info.get("is_private", False))
-        except SlackApiError as error:
-            # We could not inspect the channel (e.g. a private channel the bot is not in).
-            # Defer to the read below, which raises a clear per-channel membership error.
+        except Exception as error:
+            # We could not inspect the channel (e.g. a private channel the bot is not in,
+            # or a transient network failure). Defer to the read below, which raises a clear
+            # per-channel membership error.
             logger.warning(f"Unable to fetch Slack channel info for {channel}: {error}")
             return is_private
 
         if not is_private:
             try:
                 client.conversations_join(channel=channel)
-            except SlackApiError as error:
+            except Exception as error:
                 # Best-effort: a failed join still lets the read surface the real error
-                # (e.g. missing channels:join scope or an archived channel).
+                # (e.g. missing channels:join scope, network issue, or an archived channel).
                 logger.warning(f"Unable to auto-join public Slack channel {channel}: {error}")
         return is_private
 
@@ -317,9 +316,13 @@ class SlackIndexer(Indexer):
         code = _slack_api_error_code(error)
         if code not in CHANNEL_MEMBERSHIP_ERROR_CODES:
             return
-        if is_private or code == "channel_not_found":
+        if is_private:
             raise SourceConnectionError(
                 f"Bot must be invited to private channel {channel} before it can be read."
+            ) from error
+        if code == "channel_not_found":
+            raise SourceConnectionError(
+                f"Channel not found or bot lacks access to channel {channel}."
             ) from error
         raise SourceConnectionError(
             f"Bot is not a member of public channel {channel} and could not join it "
@@ -437,10 +440,13 @@ class SlackDownloader(Downloader):
     @staticmethod
     def _download_private_file(request: urllib.request.Request, download_path: Path) -> None:
         opener = urllib.request.build_opener(_NoRedirectHandler)
-        with opener.open(
-            request,
-            timeout=PRIVATE_FILE_DOWNLOAD_TIMEOUT_SECONDS,
-        ) as response, download_path.open("wb") as output_file:
+        with (
+            opener.open(
+                request,
+                timeout=PRIVATE_FILE_DOWNLOAD_TIMEOUT_SECONDS,
+            ) as response,
+            download_path.open("wb") as output_file,
+        ):
             shutil.copyfileobj(response, output_file)
 
     def _conversation_to_xml(self, conversation: list[list[dict]]) -> ET.ElementTree:
