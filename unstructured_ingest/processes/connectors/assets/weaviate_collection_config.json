@@ -17,7 +17,30 @@
             "indexSearchable": true,
             "name": "text",
             "tokenization": "word"
+        },
+        {
+            "dataType": [
+                "object"
+            ],
+            "name": "metadata",
+            "nestedProperties": [
+                {
+                    "dataType": [
+                        "object"
+                    ],
+                    "name": "data_source",
+                    "nestedProperties": [
+                        {
+                            "dataType": [
+                                "text"
+                            ],
+                            "name": "version"
+                        }
+                    ]
+                }
+            ]
         }
     ],
-    "vectorizer": "none"
+    "vectorizer": "none",
+    "vectorIndexType": "hnsw"
 }
