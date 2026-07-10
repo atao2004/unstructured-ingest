@@ -1,3 +1,75 @@
+## [1.6.28]
+
+### Fixes
+
+- **fix(FS-2108): download Jira attachment content to the correct path with attachment-specific display names.** Attachment downloads now write bytes to the attachment's own `source_identifiers` path instead of a separate `attachments/` directory, and each attachment gets its filename as `display_name` instead of inheriting the parent issue title. Attachment download paths are validated to stay within `download_dir` so crafted filenames cannot escape via path traversal.
+
+## [1.6.27]
+
+### Fixes
+
+- **fix(FS-2106): populate Jira creation and modification dates at index time.** `JiraIndexer._create_file_data_from_issue` only set `version` (from the issue's `updated` timestamp) and never populated `date_created`/`date_modified`, and the indexer field lists omitted `created`. Because the platform detects new and modified records from the indexer's `FileData.metadata`, Jira records carried no creation/modification dates. The indexer now requests the `created` field in `_get_issues_within_projects`, `_get_issues_within_single_board`, and `_get_issues_by_keys`, and sets `metadata.date_created` (from `created`) and `metadata.date_modified` (from `updated`) as Unix epoch strings alongside the existing `version`.
+
+## [1.6.26]
+
+### Fixes
+
+- **fix(FS-2105): populate Confluence creation/modification dates and version at index time.** The Confluence indexer now sets `date_created`, `date_modified`, and `version` from the v2 pages list response so Foundation can store page timestamps and detect page edits on subsequent runs (fixes FS-2107).
+
+## [1.6.25]
+
+### Enhancements
+
+- **feat(weaviate): add `auto_schema` option to the destination connector.** New uploader option that defaults to `false`. When `false`, the connector behaves exactly as before: the collection must already exist (or, in non-flatten mode, is seeded from the default config), and in `flatten_metadata` mode each object is conformed to the existing schema (unknown properties dropped, missing ones set to null). When `true`, the connector skips the schema fetch/conform step and lets Weaviate create the collection and its columns from the uploaded objects on first insert, so a collection does not need to exist up front (requires `AUTOSCHEMA_ENABLED=true` in Weaviate). Combined with `flatten_metadata=true`, this allows dynamic, up-front-unknown metadata to land as top-level columns without a predefined schema.
+
+## [1.6.24]
+
+### Fixes
+
+- **fix(slack): group channel messages into stable per-UTC-day packages for incremental sync.** The Slack indexer now emits one conversation package per channel per UTC day with a stable identifier derived from channel and day. `metadata.version` tracks the newest activity in the package (new messages, thread replies via `latest_reply`, edits via `edited.ts`) so re-runs update in place instead of duplicating documents.
+
+## [1.6.23]
+
+### Fixes
+
+- **fix(teradata): auto-create the destination table during upload, not only during pipeline init.** Table auto-creation ran only via `TeradataUploader.init()`, whose sole caller is the local `Pipeline`. Orchestrators that drive only the upload phase (e.g. the Unstructured Platform) never created the table, so a not-pre-created destination failed with Teradata error 3807 (`Object '<table>' does not exist`). `upload_dataframe` now ensures the table exists itself — once per run, via the idempotent `create_destination()` whose `DBC.TablesV` check skips `CREATE` for existing tables, so a user's table is never recreated.
+
+## [1.6.22]
+
+### Enhancements
+
+- **feat(slack): user token specific behavior** - differentiate between user and bot token in slack indexer, bot still attempts to join channels (required for ingestion) while user reads channel without joining. Add token specific error messages.
+
+## [1.6.21]
+
+### Fixes
+
+- **fix(embed): fix Azure OpenAI embedding precheck failing on valid deployments.** The precheck rejected Azure deployments whose name differed from the base model (the normal Azure setup), because it checked against the base-model catalog rather than the deployment. It now validates the deployment with a real test embedding call, so correctly configured deployments pass and a missing deployment reports a clear error.
+
+## [1.6.20]
+
+### Fixes
+
+- **test(stager): de-flake the stager bounded-memory tests.** `test_process_whole_peak_memory_is_flat_as_input_grows` and `test_blob_store_stager_peak_memory_is_flat_as_input_grows` asserted a near-flat `tracemalloc` peak ratio between two input sizes. `tracemalloc`'s peak includes not-yet-collected per-element garbage, so the ratio varies with GC timing across environments and the blob-store test failed on CI even though the streamed peak (~3.8 MB) was a small fraction of the ~47 MB input. The tests now assert the meaningful streaming-vs-whole-file bound — peak stays below the input file size (a whole-file load materializes the parsed list at several times the JSON text) — which is robust to GC timing while still catching a regression to whole-file loading.
+
+## [1.6.19]
+
+### Fixes
+
+- **fix(stager): stream the `.json` element file instead of loading it whole, to stop OOM on large documents.** `UploadStager.process_whole` (the path taken when the partition output has a `.json` suffix) previously called `json.load` on the entire element file, built a full conformed `list`, and wrote it whole — holding 3+ full copies of a several-hundred-MB file resident. A very large document (tens of thousands of pages) OOM-killed the stager plugin (SIGKILL, zero app logs — the classic OOMKill signature) at this step. `process_whole` now iterates the JSON array element-by-element via `ijson` (new `data_prep.json_stream`), conforms each element, and stream-writes the output (new `data_prep.write_data_streaming`), keeping only one element resident at a time — matching the bounded-memory profile of the existing `.ndjson` `stream_update` path. Output is byte-for-byte identical to the previous `write_data` result. The streamed write is atomic (temp file + `os.replace`) so it stays correct when the stager is called with the output path equal to the input path — a plain in-place `open(path, "w")` would truncate the file before the lazy reader finished, and a mid-stream failure leaves any existing artifact untouched. `ijson` is stricter than stdlib `json`, so the rare `NaN`/`Infinity`/`>int64` inputs that `json.load` accepts fall back to a buffered read. `BlobStoreUploadStager` (used by blob-store destinations such as S3) overrides `run` with the same `get_json_data` + `write_data` whole-file load and so bypassed `process_whole` entirely — it now delegates to the streamed `process_whole` (it is a pure format copy, so `conform_dict` is identity), closing the actual OOM path observed on the blob-store stager. Adds `ijson` as a base dependency. The base uploader (`Uploader.run`) has the same whole-file-load problem but its fix requires a shared-interface change and is tracked separately.
+
+## [1.6.18]
+
+### Fixes
+
+- **test(ci): stabilize and de-gate flaky live-service integration tests.** Two live-service checks reddened unrelated PRs repo-wide. (1) The SharePoint source tests byte-diffed `metadata.permissions_data` — a live snapshot of the site's ACLs (user/group object ids) that drifts whenever tenant sharing changes — against checked-in fixtures, producing a consistent "Diffs found" failure with no connector regression. `permissions_data` is now excluded from the comparison, consistent with the existing exclusions of `date_*`, `LastModified`, and the Graph download/url fields; permissions extraction remains covered by unit tests. (2) The hosted-API partitioner test intermittently hung/timed out or dropped its connection; the live call is now wrapped in a bounded retry (`retry_async`) that retries only on transient failures (5xx, timeout, transport read/connect errors) with a per-attempt timeout, while non-transient errors still fail immediately. Finally, live-service e2e jobs (which require external credentials and are inherently flaky) now run nightly, on demand, and post-merge instead of blocking every PR; the creds-free `check_untagged_tests` guard still runs on PRs.
+
+## [1.6.17]
+
+### Enhancements
+
+- **feat(slack): auto-join public channels and include url in metadata.** Have slack connector attempt to join public channels automatically and verbosly report in an error when channel cannot be accessed for any reason. Include a permalink to the file or channel message in `FileData`
+
 ## [1.6.16]
 
 ### Fixes

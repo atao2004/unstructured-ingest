@@ -27,6 +27,9 @@ dependencies = [
     "click",
     "opentelemetry-sdk",
     "certifi>=2026.1.4",
+    # Streaming JSON parser used to read large element files in bounded memory
+    # (see UploadStager.process_whole / data_prep.json_stream).
+    "ijson>=3.2.0",
 ]
 
 [project.optional-dependencies]
@@ -76,6 +79,7 @@ postgres = ["pandas", "psycopg2-binary"]
 qdrant = ["qdrant-client"]
 reddit = ["praw"]
 redis = ["redis<=5.3.0"]
+valkey = ["valkey-glide~=2.4", "valkey-glide-sync~=2.4"]
 s3 = ["s3fs", "fsspec"]
 salesforce = ["simple-salesforce"]
 sftp = ["fsspec", "paramiko"]
@@ -148,6 +152,7 @@ test = [
     "beautifulsoup4",
     "pandas",
     # Connector specific deps
+    "slack_sdk",
     "cryptography",
     "fsspec",
     "vertexai",
